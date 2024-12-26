@@ -1,7 +1,7 @@
-closed setup failed
 open setup failed
-closed setup success
 open setup success
+closed setup failed
+closed setup success
 
 reset from setup to setup
 reset from setup to exit
@@ -9,3 +9,5 @@ reset from working to setup
 reset from working to continue
 reset from working to exit
 
+in caase of not face detected for a lng time, raise a message?
+in case open setup succsess and then close failed, maybe camera move so consider start from setup. ?
