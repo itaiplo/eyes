@@ -1,0 +1,11 @@
+closed setup failed
+open setup failed
+closed setup success
+open setup success
+
+reset from setup to setup
+reset from setup to exit
+reset from working to setup
+reset from working to continue
+reset from working to exit
+

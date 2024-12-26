@@ -3,7 +3,7 @@ import time
 import top_cv
 import keyboard
 
-def main_fanc(mode="",delay=0,sensitivity=0.5):
+def main_fanc(mode="",sensitivity=0.5):
     # Paths to Haar cascades
     eye_cascPath = './haarcascade_eye_tree_eyeglasses.xml'  # Eye detection model
     face_cascPath = './haarcascade_frontalface_alt.xml'     # Face detection model
@@ -20,17 +20,16 @@ def main_fanc(mode="",delay=0,sensitivity=0.5):
 
    
     while True:
+        # mode configs
         if mode == 'run':
             if end-start>15:
                 if counter_hit/counter>float( sensitivity):
-                    print("im here")
                     return 1
                 else:
                     counter_hit=0
                     counter=0
                     start = time.time()
                     end=start
-                    print("im here...............starting again")
                 
         if mode == 'setup_open' or mode == 'setup_closed':
             if end-start>15:
@@ -38,8 +37,8 @@ def main_fanc(mode="",delay=0,sensitivity=0.5):
                     return 1
                 else:
                     return 0
+                
         ret, img = cap.read()
-        counter=counter+1
         if ret:
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  # Convert frame to grayscale
 
@@ -88,13 +87,9 @@ def main_fanc(mode="",delay=0,sensitivity=0.5):
         key = cv2.waitKey(1)
         if key == ord('q') or key == ord('Q'):
             break
-        print ("counter is"+ str(counter))
+        counter=counter+1
         end = time.time()
-        print("time is" +str(end - start))
-        if mode=="init_setup":
-            if(end - start>15):
-                return (end - start,counter)
-        time.sleep(delay)
+
 
     # Release the capture and close all OpenCV windows
     cap.release()
