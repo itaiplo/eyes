@@ -1,0 +1,41 @@
+
+func setup open eyes
+    while (1)
+        press y when you ready to start setup open eyes
+        return_value=start running the procces with flag setup open eyes
+        if(return value ==ok)
+            print (setup open good)
+            break   
+
+func setup closed eyes
+    while (1)
+        press y when you ready to start setup closed eyes
+        return_value=start running the procces with flag setup closed eyes
+        if(return value ==ok)
+            print (setup closed good)
+            break   
+
+func open and closed setup
+    setup open eyes
+    setup closed eyes
+    main proces
+     print (setup closed and open done)
+
+func hendle reset//take care the case we were on setup and got reset. should enter if else...
+    print ("input was detectet, choose what you want to do")
+    if input =0: #reset
+        open and closed setup
+        //exit from while true in cv_closed_eyes_detect
+        
+    if input=1 //continue and ignore interupt
+        main_proces
+        back to main procces
+    if input =2 //exit at all
+        exit at all
+
+func main
+    while (1)
+        press y when you ready to start setup. go to setup open eyes
+        fucn setup open and close
+        awakness time=input
+        main proces(awakness)
