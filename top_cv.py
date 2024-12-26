@@ -15,7 +15,7 @@ def open_eyes_setup():
             if (ret_func==1):
                 print("setup open eyes secceded")
                 break
-
+ 
 
 def closed_eyes_setup():
     while (1):
