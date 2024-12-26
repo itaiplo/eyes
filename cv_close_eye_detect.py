@@ -3,6 +3,11 @@ import time
 import top_cv
 import keyboard
 
+def close_window(cap):
+    cap.release()
+    cv2.destroyAllWindows()
+    
+
 def main_fanc(mode="",sensitivity=0.5):
     # Paths to Haar cascades
     eye_cascPath = './haarcascade_eye_tree_eyeglasses.xml'  # Eye detection model
@@ -20,6 +25,21 @@ def main_fanc(mode="",sensitivity=0.5):
 
    
     while True:
+
+        if keyboard.is_pressed('r'):
+            ret=top_cv.handle_reset(mode)
+            if ret==0: # reset to setup again
+                close_window(cap)
+                return 0
+            elif ret==1: #reset counters and time
+                counter=0
+                counter_hit=0
+                start = time.time()
+                end=start
+            elif ret==2: #exit
+                close_window(cap)
+                exit(0)
+        
         # mode configs
         if mode == 'run':
             if end-start>15:
@@ -32,6 +52,8 @@ def main_fanc(mode="",sensitivity=0.5):
                     end=start
                 
         if mode == 'setup_open' or mode == 'setup_closed':
+            # if 'r' key detected, call handle_reset function from top_cv.py
+
             if end-start>15:
                 if (counter_hit/counter>0.8):
                     return 1
