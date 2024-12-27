@@ -3,6 +3,8 @@ import time
 import top_cv
 import keyboard
 
+
+
 def close_window(cap):
     cap.release()
     cv2.destroyAllWindows()
@@ -25,7 +27,6 @@ def main_fanc(mode="",sensitivity=0.5):
 
    
     while True:
-
         if keyboard.is_pressed('r'):
             ret=top_cv.handle_reset(mode)
             if ret==0: # reset to setup again

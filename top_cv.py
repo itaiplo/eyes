@@ -2,14 +2,23 @@ import cv_close_eye_detect
 import keyboard
 import time
 import winsound
+import msvcrt
+
+def clear_input_buffer():
+    """Clears the input buffer on Windows."""
+    while msvcrt.kbhit():
+        msvcrt.getch()
 
 # Function to handle reset
 def handle_reset(mode):
+    clear_input_buffer()
     print("Reset triggered.")
     if mode =='run':
         while (1):
+            #reset the input
             inp=input("0 for setup again, 1 for continue without setup, 2 for exit")
             inp= int(inp)
+            #wait for keyboard press 0
             if inp==0:
                 return 0
             elif inp==1:
