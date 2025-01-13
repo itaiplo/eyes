@@ -58,6 +58,8 @@ def setup_open_and_close():
 
 def run_proccess():
     sensitivity=input("enter sensitivity value: ")
+    sleep_time=input("enter sleep time value: ")
+    time.sleep(int(sleep_time))
     print ("proccess started")
     ret=cv_close_eye_detect.main_fanc(mode="run",sensitivity=sensitivity)
     return ret
@@ -65,19 +67,21 @@ def run_proccess():
 def main():
     flag=0
     while (1):
-        print("start setup")
         if(flag==0):
+            print("start setup")
             setup_open_and_close()
         flag=0
         ret=run_proccess()
         if ret==1:
+            print("eyes are open press p to stop")
             while (1):    
                 winsound.Beep(500,50)
                 if keyboard.is_pressed('p'):
+                    clear_input_buffer()
                     print("indicator was detected, what do you want to do?")
                     while (1):
                         break_flag=0
-                        inp=input("0 for setup again, 1 for continue without setup, 2 for exit")
+                        inp=input("0 for setup again, 1 for continue without setup, 2 for exit: ")
                         inp=int(inp)
                         if inp==0:
                             break_flag=1

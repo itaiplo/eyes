@@ -11,3 +11,10 @@ reset from working to exit
 
 in caase of not face detected for a lng time, raise a message?
 in case open setup succsess and then close failed, maybe camera move so consider start from setup. ?
+
+what the time range should be? low is good to not miss awakness but bud for awake the family for nothing. fifo needed if we increase the range?
+feature: maybe take some time before main proccess start.V
+indiciator message V
+time sleep location V
+bufferp V
+for demo- song
