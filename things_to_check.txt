@@ -9,12 +9,11 @@ reset from working to setup
 reset from working to continue
 reset from working to exit
 
-in caase of not face detected for a lng time, raise a message?
-in case open setup succsess and then close failed, maybe camera move so consider start from setup. ?
-
+GUI-
+screen all the time
+look for failed, what will happend?
+at the time, there is an option to start proccess. is it good or change back to level after level
+longer beeper or song for demo
 what the time range should be? low is good to not miss awakness but bud for awake the family for nothing. fifo needed if we increase the range?
-feature: maybe take some time before main proccess start.V
-indiciator message V
-time sleep location V
-bufferp V
-for demo- song
+exe?
+in caase of not face detected for a long time, raise a message?
