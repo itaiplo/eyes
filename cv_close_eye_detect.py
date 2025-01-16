@@ -30,7 +30,7 @@ def main_fanc(mode="", sensitivity=0.5):
     Returns 1 if eyes open (or closed, depending on your logic) were detected 
     in the specified threshold/time window, otherwise returns 0.
     """
-    global counter, counter_hit, start_time
+    global counter, counter_hit, start_time, counter_no_face
     # Paths to Haar cascades
     eye_cascPath = './haarcascade_eye_tree_eyeglasses.xml'
     face_cascPath = './haarcascade_frontalface_alt.xml'
@@ -45,6 +45,8 @@ def main_fanc(mode="", sensitivity=0.5):
     # Initialize counters/timers
     counter = 0
     counter_hit = 0
+    counter_no_face = 0
+
     start_time = time.time()
 
     while True:
@@ -92,6 +94,7 @@ def main_fanc(mode="", sensitivity=0.5):
                         counter_hit += 1
                     print("Eyes are OPEN.")
         else:
+            counter_no_face += 1
             print("No face detected.")
 
         # Show frame
@@ -107,13 +110,18 @@ def main_fanc(mode="", sensitivity=0.5):
             # Example: every 15 seconds, check ratio
             if now - start_time > 15:
                 ratio = counter_hit / counter if counter else 0
+                ratio_no_face = counter_no_face / counter if counter else 0
                 if ratio > sensitivity:
                     close_window(cap)
                     return 1
+                elif ratio_no_face > 0.5:
+                    close_window(cap)
+                    return -1
                 else:
                     # Reset counters and time
                     counter_hit = 0
                     counter = 0
+                    counter_no_face = 0
                     start_time = now
 
         if mode in ('setup_open', 'setup_closed'):

@@ -53,6 +53,14 @@ def run_process(sensitivity, sleep_time, on_eyes_open=None):
         # If a callback is provided, call it:
         if on_eyes_open is not None:
             on_eyes_open()
+    if ret == -1:
+        print("No face detected, Recomand to recalibrate")
+        # Optional: beep to indicate
+        if winsound:
+            winsound.Beep(500, 200)
+        # If a callback is provided, call it:
+        if on_eyes_open is not None:
+            on_eyes_open()
 
     return ret
 
