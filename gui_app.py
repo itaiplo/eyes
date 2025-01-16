@@ -59,23 +59,49 @@ class EyeDetectionApp(ctk.CTk):
     def open_camera_preview(self):
         """
         Opens the camera in a blocking loop using OpenCV.
-        The user must press 'q' in the OpenCV window to close it.
+        The user can close the window by either:
+        - pressing 'q'
+        - clicking anywhere in the window with the mouse
         """
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             self.label_status.configure(text="Error: Cannot open camera.")
             return
 
-        self.label_status.configure(text="Camera preview opened. Press 'q' to close.")
+        self.label_status.configure(
+            text="Camera preview opened. Press 'q' or click anywhere in the window to close."
+        )
+
+        # A flag to indicate when to close the preview
+        self.close_camera = False
+
+        # Define a mouse callback that sets `close_camera = True` on left-click
+        def mouse_handler(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                self.close_camera = True
+
+        # Name the OpenCV window and set the callback
+        cv2.namedWindow("Camera Preview")
+        cv2.setMouseCallback("Camera Preview", mouse_handler)
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            cv2.imshow("Camera Preview (press 'q' to close)", frame)
+            cv2.imshow("Camera Preview", frame)
 
+            # Check if user pressed 'q'
             if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+            # Check if user clicked in the window
+            if self.close_camera:
+                break
+
+            # OPTIONAL: Also check if the user manually closed the window by clicking the [X]
+            # The window property becomes < 0 when the user clicks the window's close button.
+            if cv2.getWindowProperty("Camera Preview", cv2.WND_PROP_VISIBLE) < 1:
                 break
 
         cap.release()
