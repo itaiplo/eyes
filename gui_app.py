@@ -4,6 +4,8 @@ import customtkinter as ctk
 import threading
 import cv2
 import time
+import pygame
+import os
 from PIL import Image, ImageTk
 
 from cv_close_eye_detect import EyeDetector
@@ -12,8 +14,11 @@ class EyeDetectionApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Unified Camera & Detection GUI")
+        self.title("Unified Camera & Detection with Song Playback")
         self.geometry("900x600")
+
+        # --------------- Initialize Pygame for MP3 Playback --------------- #
+        pygame.mixer.init()
 
         # --------------- State Variables --------------- #
         self.running_preview = True
@@ -45,7 +50,7 @@ class EyeDetectionApp(ctk.CTk):
             self.controls_frame,
             from_=0.5,
             to=1.0,
-            number_of_steps=5,  # 0.5->1.0 in steps of 0.1
+            number_of_steps=5,  # steps of 0.1
             command=self.on_sensitivity_change
         )
         self.sensitivity_slider.set(0.5)
@@ -62,7 +67,7 @@ class EyeDetectionApp(ctk.CTk):
             self.controls_frame,
             from_=0,
             to=900,
-            number_of_steps=15,  # 0..900 in increments of 60
+            number_of_steps=15,  # 0..900/60 => 15 steps
             command=self.on_sleep_change
         )
         self.sleep_slider.set(0)
@@ -96,7 +101,7 @@ class EyeDetectionApp(ctk.CTk):
         self.label_status.pack(pady=10)
 
         # --------------- Open ONE Camera --------------- #
-        self.cap = cv2.VideoCapture(0)  # or 1, if external
+        self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             self.label_status.configure(text="Error: Cannot open camera.")
         else:
@@ -120,69 +125,56 @@ class EyeDetectionApp(ctk.CTk):
 
     # ------------------- Detection Actions ------------------- #
     def setup_open_handler(self):
-        """
-        Start 'setup_open' mode. We'll do a delayed start if sleep_value > 0,
-        then call eye_detector.start_detection("setup_open", sensitivity).
-        """
         self.label_status.configure(text="Setup Open Eyes scheduled...")
         self.detection_active = True
 
-        def do_setup_open():
-            self.label_status.configure(text="Setting up Open Eyes (15s)...")
-            self.eye_detector.start_detection("setup_open", self.sensitivity_value)
-
-        # If sleep_time is 0, do immediately; else wait in a thread
         if self.sleep_value > 0:
+            # Sleep in a background thread, then start detection
             threading.Thread(target=self.delayed_start, args=("setup_open",), daemon=True).start()
         else:
-            do_setup_open()
+            self.do_setup_open()
+
+    def do_setup_open(self):
+        self.label_status.configure(text="Setting up Open Eyes (15s)...")
+        self.eye_detector.start_detection("setup_open", self.sensitivity_value)
 
     def setup_closed_handler(self):
         self.label_status.configure(text="Setup Closed Eyes scheduled...")
         self.detection_active = True
 
-        def do_setup_closed():
-            self.label_status.configure(text="Setting up Closed Eyes (15s)...")
-            self.eye_detector.start_detection("setup_closed", self.sensitivity_value)
-
         if self.sleep_value > 0:
             threading.Thread(target=self.delayed_start, args=("setup_closed",), daemon=True).start()
         else:
-            do_setup_closed()
+            self.do_setup_closed()
+
+    def do_setup_closed(self):
+        self.label_status.configure(text="Setting up Closed Eyes (15s)...")
+        self.eye_detector.start_detection("setup_closed", self.sensitivity_value)
 
     def run_process_handler(self):
         self.label_status.configure(text="Run Process scheduled...")
         self.detection_active = True
 
-        def do_run():
-            self.label_status.configure(text="Running detection (15s rolling window)...")
-            self.eye_detector.start_detection("run", self.sensitivity_value)
-
         if self.sleep_value > 0:
             threading.Thread(target=self.delayed_start, args=("run",), daemon=True).start()
         else:
-            do_run()
+            self.do_run()
+
+    def do_run(self):
+        self.label_status.configure(text="Running detection (15s rolling window)...")
+        self.eye_detector.start_detection("run", self.sensitivity_value)
 
     def delayed_start(self, mode_str):
-        """
-        Wait for self.sleep_value seconds, then call the appropriate start function
-        from a background thread so the GUI doesn't freeze.
-        """
+        """ Wait for self.sleep_value seconds, then call the appropriate start function. """
         time.sleep(self.sleep_value)
         if mode_str == "setup_open":
-            self.label_status.configure(text="Setting up Open Eyes (15s)...")
-            self.eye_detector.start_detection("setup_open", self.sensitivity_value)
+            self.do_setup_open()
         elif mode_str == "setup_closed":
-            self.label_status.configure(text="Setting up Closed Eyes (15s)...")
-            self.eye_detector.start_detection("setup_closed", self.sensitivity_value)
+            self.do_setup_closed()
         elif mode_str == "run":
-            self.label_status.configure(text="Running detection (15s rolling window)...")
-            self.eye_detector.start_detection("run", self.sensitivity_value)
+            self.do_run()
 
     def stop_handler(self):
-        """
-        Stop or reset detection.
-        """
         self.label_status.configure(text="Stop/Reset requested...")
         self.detection_active = False
         self.eye_detector.stop_detection()
@@ -190,49 +182,87 @@ class EyeDetectionApp(ctk.CTk):
     # ------------------- Preview + Detection Loop ------------------- #
     def update_preview(self):
         """
-        Called repeatedly via .after().
-        1) Grab a frame from self.cap
-        2) Show it in self.camera_label
-        3) If detection is active, pass the frame to self.eye_detector.process_frame()
-        4) Check if detection is done (return code = 0 or 1), update status
+        - Grabs a frame from self.cap
+        - If detection is active, pass frame to eye_detector
+        - Draw the returned frame in the GUI
+        - If detection finishes => handle success/fail
+        - Repeats every ~30ms
         """
         if self.running_preview and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
-                # Show preview
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                status = None
+                old_mode = None
+                processed_frame = frame  # fallback
+
+                if self.detection_active:
+                    # process_frame returns (status, old_mode, out_frame)
+                    result = self.eye_detector.process_frame(frame)
+                    if result is not None:
+                        status, old_mode, processed_frame = result
+                    else:
+                        # ongoing detection => result is None
+                        # but still get processed_frame for bounding box
+                        # "None" is a 3-tuple of (None, None, frame)
+                        # in that case we do:
+                        status, old_mode, processed_frame = (None, None, frame)
+                    # If the function returned a bounding box, we use that frame
+                else:
+                    # Not detecting => just show normal frame
+                    processed_frame = frame
+
+                # Show the processed_frame in the GUI
+                frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(frame_rgb)
                 pil_img = pil_img.resize((500, 400), Image.Resampling.LANCZOS)
                 ctk_img = ctk.CTkImage(light_image=pil_img, size=(500, 400))
                 self.camera_label.configure(image=ctk_img)
                 self.camera_label.image = ctk_img
 
-                # If detection is active, process the frame
-                if self.detection_active:
-                    result = self.eye_detector.process_frame(frame)
-                    if result is not None:
-                        # detection session ended
-                        if result == 1:
-                            # success => eyes open or closed ratio above threshold
-                            if self.eye_detector.mode == "run":
-                                # eyes open event
-                                self.label_status.configure(text="Eyes detected as open!")
-                            else:
-                                # setup success
-                                self.label_status.configure(text=f"{self.eye_detector.mode} SUCCESS!")
+                # If detection finished
+                if status is not None:
+                    # status=1 => success, 0 => fail
+                    self.detection_active = False
+                    if status == 1:
+                        # success
+                        if old_mode == "run":
+                            # Eyes open success => play the song
+                            self.label_status.configure(text="Eyes detected as open! (RUN SUCCESS)")
+                            self.play_song()
                         else:
-                            # result == 0 => fail
-                            self.label_status.configure(text=f"{self.eye_detector.mode} FAILED.")
-                        self.detection_active = False
-
-        # Schedule next update in 30 ms
+                            # setup success
+                            self.label_status.configure(text=f"{old_mode} SUCCESS!")
+                    else:
+                        # fail
+                        if old_mode in ("setup_open", "setup_closed"):
+                            self.label_status.configure(text=f"{old_mode} FAILED.")
+                        elif old_mode == "run":
+                            # theoretically you never get a "fail" from run,
+                            # but if you do => ratio was too low in last window
+                            self.label_status.configure(text="Run: ratio too low => no success yet.")
+                    # done processing
+        # schedule next
         self.after(30, self.update_preview)
+
+    # ------------------- Song Playback ------------------- #
+    def play_song(self):
+        """
+        Play 'song.mp3' once using pygame.
+        """
+        try:
+            pygame.mixer.music.stop()  # stop if something else is playing
+            mp3_path = "song.mp3"  # or absolute path
+            pygame.mixer.music.load(mp3_path)
+            pygame.mixer.music.play()
+        except Exception as e:
+            print(f"Error playing {mp3_path}: {e}")
 
     # ------------------- Window Close ------------------- #
     def on_closing(self):
         self.running_preview = False
         if self.cap.isOpened():
             self.cap.release()
+        pygame.mixer.quit()  # optional: cleanly shut down audio
         self.destroy()
 
 if __name__ == "__main__":
