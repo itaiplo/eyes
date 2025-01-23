@@ -12,7 +12,7 @@ class EyeDetectionApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Unified Detection with 15s Blocks & FIFO Array")
+        self.title("Unified Detection (Block Logic + Mirror)")
         self.geometry("900x600")
 
         # Initialize Pygame for MP3 playback
@@ -21,7 +21,7 @@ class EyeDetectionApp(ctk.CTk):
         # State
         self.running_preview = True
         self.detection_active = False
-        self.awake_time_value = 30  # in seconds, from 30..300 step 30
+        self.awake_time_value = 30  # user-chosen param for run mode
         self.sleep_value = 0
 
         # Single EyeDetector
@@ -32,25 +32,23 @@ class EyeDetectionApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=0)
         self.grid_rowconfigure(0, weight=1)
 
-        # Camera Preview (left)
+        # Camera Preview
         self.camera_label = ctk.CTkLabel(self, text="")
         self.camera_label.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
-        # Controls (right)
+        # Controls
         self.controls_frame = ctk.CTkFrame(self)
         self.controls_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
-        # 1) Awake Time slider: 30..300 in steps of 30
-        self.awake_label = ctk.CTkLabel(self.controls_frame, text="Awake Time (30 - 300s, step=30)")
+        # Awake Time slider: 30..300 step=30
+        self.awake_label = ctk.CTkLabel(self.controls_frame, text="Awake Time (30-300, step=30)")
         self.awake_label.pack(pady=(10,0))
 
-        # We'll do 10 steps => 30, 60, 90, ... 300
-        # number_of_steps=9 => that means 10 positions from_=30..300
         self.awake_slider = ctk.CTkSlider(
             self.controls_frame,
             from_=30,
             to=300,
-            number_of_steps=9,
+            number_of_steps=9,  # 10 positions total (30..300)
             command=self.on_awake_change
         )
         self.awake_slider.set(30)
@@ -59,8 +57,8 @@ class EyeDetectionApp(ctk.CTk):
         self.awake_value_label = ctk.CTkLabel(self.controls_frame, text="30 sec")
         self.awake_value_label.pack(pady=(0,10))
 
-        # 2) Sleep Time slider (0..900 in steps of 60, optional)
-        self.sleep_label = ctk.CTkLabel(self.controls_frame, text="Sleep Time (0 - 900s, step=60)")
+        # Sleep Time slider (0..900 step=60)
+        self.sleep_label = ctk.CTkLabel(self.controls_frame, text="Sleep Time (0-900, step=60)")
         self.sleep_label.pack(pady=(10,0))
 
         self.sleep_slider = ctk.CTkSlider(
@@ -100,7 +98,7 @@ class EyeDetectionApp(ctk.CTk):
         self.label_status = ctk.CTkLabel(self.controls_frame, text="Status: Waiting...")
         self.label_status.pack(pady=10)
 
-        # Open camera
+        # Camera
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             self.label_status.configure(text="Error: Cannot open camera.")
@@ -110,9 +108,8 @@ class EyeDetectionApp(ctk.CTk):
         # Start preview
         self.update_preview()
 
-    # ---------------- Slider Callbacks ----------------- #
+    # ------------- Slider Callbacks ------------- #
     def on_awake_change(self, val):
-        # val goes from 30..300. Round to nearest multiple of 30 if needed.
         step = 30
         new_val = int(round(val / step) * step)
         self.awake_slider.set(new_val)
@@ -126,7 +123,7 @@ class EyeDetectionApp(ctk.CTk):
         self.sleep_value = new_val
         self.sleep_value_label.configure(text=f"{new_val} sec")
 
-    # ---------------- Setup Handlers ------------------- #
+    # ------------- Setup Handlers ------------- #
     def setup_open_handler(self):
         self.label_status.configure(text="Setup Open Eyes scheduled...")
         self.detection_active = True
@@ -138,7 +135,7 @@ class EyeDetectionApp(ctk.CTk):
 
     def do_setup_open(self):
         self.label_status.configure(text="Setting up Open Eyes (15s)...")
-        self.eye_detector.start_detection("setup_open", awake_time=0)  # awake_time not used here
+        self.eye_detector.start_detection("setup_open", awake_time=0)
 
     def setup_closed_handler(self):
         self.label_status.configure(text="Setup Closed Eyes scheduled...")
@@ -153,7 +150,7 @@ class EyeDetectionApp(ctk.CTk):
         self.label_status.configure(text="Setting up Closed Eyes (15s)...")
         self.eye_detector.start_detection("setup_closed", awake_time=0)
 
-    # ---------------- Run Process (with block-based logic) ---------------- #
+    # ------------- Run Process ------------- #
     def run_process_handler(self):
         self.label_status.configure(text="Run Process scheduled...")
         self.detection_active = True
@@ -164,8 +161,7 @@ class EyeDetectionApp(ctk.CTk):
             self.do_run()
 
     def do_run(self):
-        self.label_status.configure(text="Running detection (15s blocks, FIFO array) ...")
-        # Pass the user-chosen awake_time_value to run mode
+        self.label_status.configure(text="Running detection (15s blocks) ...")
         self.eye_detector.start_detection("run", awake_time=self.awake_time_value)
 
     def delayed_start(self, mode_str):
@@ -177,72 +173,70 @@ class EyeDetectionApp(ctk.CTk):
         elif mode_str == "run":
             self.do_run()
 
-    # ---------------- Stop/Reset ---------------- #
+    # ------------- Stop/Reset ------------- #
     def stop_handler(self):
         self.label_status.configure(text="Stop/Reset requested...")
         self.detection_active = False
         self.eye_detector.stop_detection()
-        # Also stop any music
         pygame.mixer.music.stop()
 
-    # ---------------- Preview Loop ---------------- #
+    # ------------- Preview Loop ------------- #
     def update_preview(self):
         """
-        - Grab frame
-        - Flip horizontally if you want a mirrored view (optional)
-        - If detection active, pass to eye_detector
-        - If we get a result => handle it
-        - If result=2 => sum of array > threshold => play song
+        - Grab frame from camera
+        - Mirror it horizontally
+        - If detection active, pass frame to eye_detector
+        - Draw processed frame
+        - Handle status codes
         """
         if self.running_preview and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
-                # Mirror if desired: frame = cv2.flip(frame, 1)
+                # Mirror the camera feed
+                frame = cv2.flip(frame, 1)
 
                 if self.detection_active:
                     status, old_mode, processed_frame = self.eye_detector.process_frame(frame)
                 else:
                     status, old_mode, processed_frame = (None, None, frame)
 
-                # Display the processed_frame
+                # Display
                 frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                pil_img = Image.fromarray(frame_rgb)
-                pil_img = pil_img.resize((500, 400), Image.Resampling.LANCZOS)
+                pil_img = Image.fromarray(frame_rgb).resize((500, 400), Image.Resampling.LANCZOS)
                 ctk_img = ctk.CTkImage(light_image=pil_img, size=(500, 400))
                 self.camera_label.configure(image=ctk_img)
                 self.camera_label.image = ctk_img
 
-                # Check if detection returned a code
+                # Check result
                 if status is not None:
+                    # setup_open/closed => 0 or 1
                     if old_mode in ("setup_open", "setup_closed"):
-                        # status = 0 => fail, 1 => success
                         self.detection_active = False
                         if status == 1:
                             self.label_status.configure(text=f"{old_mode} SUCCESS!")
                         else:
                             self.label_status.configure(text=f"{old_mode} FAILED.")
+
                     elif old_mode == "run":
-                        # status can be 2 => sum_of_array> threshold => play song
+                        # status=2 => sum(run_results) > threshold => play song
                         if status == 2:
-                            # we STILL remain in run mode (unless user stops),
-                            # but we want to play the song
                             self.label_status.configure(text="Run blocks => threshold exceeded!")
                             self.play_song()
 
         self.after(30, self.update_preview)
 
-    # ---------------- Song Playback ---------------- #
+    # ------------- Song Playback ------------- #
     def play_song(self):
-        """Play 'song.mp3' once using pygame."""
+        """Play 'song.mp3' once."""
         try:
-            pygame.mixer.music.stop()  # stop if something else is playing
+            pygame.mixer.music.stop()
             mp3_path = "song.mp3"
             pygame.mixer.music.load(mp3_path)
             pygame.mixer.music.play()
         except Exception as e:
             print(f"Error playing {mp3_path}: {e}")
 
-    # ---------------- Window Close ---------------- #
+    # ------------- Window Close ------------- #
     def on_closing(self):
         self.running_preview = False
         if self.cap.isOpened():

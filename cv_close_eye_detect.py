@@ -29,13 +29,12 @@ class EyeDetector:
         self.run_results = [0]*20     # FIFO array of length 20
         self.block_index = 0          # which slot we’re writing
         self.awake_time = 30          # user-chosen param (30..300)
-        # The threshold = awake_time/15. If sum(run_results) > threshold => play song
 
     def start_detection(self, mode, awake_time=30):
         """
         Begin a detection session.
-        For 'setup_open' or 'setup_closed', we do the old 15-second window logic.
-        For 'run', we do indefinite 15-second blocks, storing success/fail in run_results.
+        For 'setup_open' or 'setup_closed', same 15s window logic.
+        For 'run', indefinite 15s blocks, storing success/fail in run_results.
         """
         self.mode = mode
         self.active = True
@@ -61,13 +60,14 @@ class EyeDetector:
         self.active = False
         self.mode = None
 
-        # Also reset run-related counters if needed
+        # Reset run-related counters
         self.run_results = [0]*20
         self.block_index = 0
         self.block_start_time = 0
         self.block_frame_count = 0
         self.block_hit_count = 0
 
+        # Reset setup counters
         self.start_time = 0
         self.frame_count = 0
         self.hit_count = 0
@@ -78,16 +78,12 @@ class EyeDetector:
         
         Returns: (status, old_mode, out_frame)
           - status = None => still ongoing
-          - status = 0 => fail (only relevant for setup modes)
-          - status = 1 => success (only relevant for setup modes)
-          - status = 2 => "Awake threshold" event (run mode) => play the song
+          - status = 0 => fail (setup modes)
+          - status = 1 => success (setup modes)
+          - status = 2 => "awake threshold" event (run mode => play song)
           
           old_mode => "setup_open", "setup_closed", or "run"
           out_frame => frame with face bounding box if face detected
-          
-        For 'setup_open' or 'setup_closed', same old logic: single 15s window => success/fail => exit.
-        For 'run', indefinite 15s blocks => store 1 if success, else 0 in run_results => 
-                if sum(run_results) > (awake_time/15), return code=2 => triggers the song.
         """
         out_frame = frame.copy()  # so we can draw bounding boxes
 
@@ -155,27 +151,26 @@ class EyeDetector:
 
             return (None, None, out_frame)
 
-        # ---------- RUN MODE ----------
+        # ---------- RUN MODE (15-second blocks) ----------
         if self.mode == "run":
-            # 1) Update block counters
             self.block_frame_count += 1
 
             # "hit" if eyes_open or no_face
             if eyes_open or no_face:
                 self.block_hit_count += 1
 
-            # Check if 15s block ended
             block_elapsed = time.time() - self.block_start_time
             if block_elapsed > 15:
-                # Evaluate block success (if block_hit_count>0 => success=1)
-                # (Alternatively, you could do ratio>0 to decide success. 
-                #  But for simplicity, let's say "any hits => success=1".)
-                if self.block_hit_count > 0:
+                # Evaluate block success if ratio > 0.75
+                ratio = 0.0
+                if self.block_frame_count > 0:
+                    ratio = self.block_hit_count / float(self.block_frame_count)
+                
+                if ratio > 0.65:
                     success_val = 1
                 else:
                     success_val = 0
 
-                # Write to FIFO array
                 idx = self.block_index % 20
                 self.run_results[idx] = success_val
                 self.block_index += 1
@@ -185,17 +180,14 @@ class EyeDetector:
                 self.block_frame_count = 0
                 self.block_start_time = time.time()
 
-                # Check sum of run_results
                 total_success = sum(self.run_results)
                 threshold_blocks = self.awake_time / 15.0
-                print(f"[EyeDetector] run block ended => success={success_val}, sum={total_success}")
+                print(f"[EyeDetector] run block ended => block_ratio={ratio:.2f}, success={success_val}, sum={total_success}")
 
                 # If sum > threshold_blocks => return code=2 => GUI plays song
-                if total_success > threshold_blocks:
-                    # We'll return a special code=2 => meaning "Play Song"
+                if total_success >= threshold_blocks:
                     return (2, "run", out_frame)
 
-            # If still within the block, or block ended but sum <= threshold => keep going
             return (None, None, out_frame)
 
         return (None, None, out_frame)
