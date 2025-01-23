@@ -275,8 +275,10 @@ class EyeDetectionApp(ctk.CTk):
         """
         async def _async_scan():
             try:
-                devices = await BleakScanner.discover(timeout=5.0)
+                devices = await BleakScanner.discover(timeout=10.0)
                 if devices:
+                    for device in devices:
+                        print(f"Device found: {device.name}")
                     return devices[0].name or "Unnamed BLE Device"
                 return None
             except Exception as e:
