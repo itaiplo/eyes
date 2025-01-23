@@ -1,5 +1,3 @@
-# gui_app.py
-
 import customtkinter as ctk
 import threading
 import cv2
@@ -175,25 +173,32 @@ class EyeDetectionApp(ctk.CTk):
             self.do_run()
 
     def stop_handler(self):
+        """Stop/Reset detection and stop the song."""
         self.label_status.configure(text="Stop/Reset requested...")
         self.detection_active = False
         self.eye_detector.stop_detection()
+        # Also stop any music
+        pygame.mixer.music.stop()
 
     # ------------------- Preview + Detection Loop ------------------- #
     def update_preview(self):
         """
         - Grabs a frame from self.cap
+        - Mirror it horizontally
         - If detection is active, pass frame to eye_detector
-        - Draw the returned frame in the GUI
+        - Show the returned frame in the GUI
         - If detection finishes => handle success/fail
         - Repeats every ~30ms
         """
         if self.running_preview and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
+                # 1) Mirror the frame horizontally
+                frame = cv2.flip(frame, 1)
+
                 status = None
                 old_mode = None
-                processed_frame = frame  # fallback
+                processed_frame = frame
 
                 if self.detection_active:
                     # process_frame returns (status, old_mode, out_frame)
@@ -201,14 +206,9 @@ class EyeDetectionApp(ctk.CTk):
                     if result is not None:
                         status, old_mode, processed_frame = result
                     else:
-                        # ongoing detection => result is None
-                        # but still get processed_frame for bounding box
-                        # "None" is a 3-tuple of (None, None, frame)
-                        # in that case we do:
                         status, old_mode, processed_frame = (None, None, frame)
-                    # If the function returned a bounding box, we use that frame
                 else:
-                    # Not detecting => just show normal frame
+                    # Not detecting => just show normal mirrored frame
                     processed_frame = frame
 
                 # Show the processed_frame in the GUI
@@ -231,16 +231,15 @@ class EyeDetectionApp(ctk.CTk):
                             self.play_song()
                         else:
                             # setup success
-                            self.label_status.configure(text=f"{old_mode} SUCCESS!")
+                            if old_mode is not None:
+                                self.label_status.configure(text=f"{old_mode} SUCCESS!")
                     else:
                         # fail
                         if old_mode in ("setup_open", "setup_closed"):
                             self.label_status.configure(text=f"{old_mode} FAILED.")
                         elif old_mode == "run":
-                            # theoretically you never get a "fail" from run,
-                            # but if you do => ratio was too low in last window
                             self.label_status.configure(text="Run: ratio too low => no success yet.")
-                    # done processing
+
         # schedule next
         self.after(30, self.update_preview)
 
