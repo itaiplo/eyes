@@ -1,115 +1,180 @@
-# gui_app.py
-
 import customtkinter as ctk
 import threading
 import cv2
-import pygame
-import os
+import time
 
-import top_cv  # Your refactored top_cv.py from before
+import top_cv  # from your existing code
+from PIL import Image, ImageTk
 
 class EyeDetectionApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.title("Eye Detection GUI")
-        self.geometry("500x500")
+        self.geometry("900x600")
 
-        # 1) Initialize Pygame mixer
-        pygame.mixer.init()
+        # Configure the main window's grid: 2 columns, 1 row
+        self.grid_columnconfigure(0, weight=1)  # camera feed column
+        self.grid_columnconfigure(1, weight=0)  # controls column
+        self.grid_rowconfigure(0, weight=1)
 
-        # 2) Create UI elements
-        self.label_info = ctk.CTkLabel(self, text="Eye Detection Setup", font=("Arial", 16))
-        self.label_info.pack(pady=10)
+        # ------------------ CAMERA PREVIEW (left side) ------------------ #
+        self.camera_label = ctk.CTkLabel(self, text="")
+        self.camera_label.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
-        # Button to open camera preview
-        self.button_camera = ctk.CTkButton(self, text="Open Camera Preview", command=self.open_camera_preview)
-        self.button_camera.pack(pady=5)
+        # Start camera capture for continuous preview
+        # (Assumes camera index = 0; change if needed)
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            print("Warning: Could not open camera 0.")
+        self.preview_running = True
+        self.update_preview()  # start the continuous preview loop
 
-        # Buttons for setup
-        self.button_setup_open = ctk.CTkButton(self, text="Setup Open Eyes", command=self.setup_open_handler)
+        # ------------------ CONTROLS (right side) ------------------ #
+        self.controls_frame = ctk.CTkFrame(self)
+        self.controls_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+
+        # 1) Sensitivity slider
+        self.sensitivity_label = ctk.CTkLabel(self.controls_frame, text="Sensitivity")
+        self.sensitivity_label.pack(pady=(10,0))
+
+        # We'll map 0.5..1.0 in steps of 0.1
+        # ctk.CTkSlider doesn't have a "resolution" parameter like Tk's Scale,
+        # but we can use 'number_of_steps' to approximate increments.
+        # range 0.5..1.0 => total span 0.5 => in increments of 0.1 => 5 steps.
+        self.sensitivity_slider = ctk.CTkSlider(
+            self.controls_frame,
+            from_=0.5,
+            to=1.0,
+            number_of_steps=5,  # 0.5->1.0 in steps of 0.1
+            command=self.on_sensitivity_change
+        )
+        self.sensitivity_slider.set(0.5)
+        self.sensitivity_slider.pack(pady=(0,5))
+
+        # Display the sensitivity value
+        self.sensitivity_value_label = ctk.CTkLabel(self.controls_frame, text="0.5")
+        self.sensitivity_value_label.pack(pady=(0,10))
+
+        # Internal variable to store current sensitivity
+        self.sensitivity_value = 0.5
+
+        # 2) Sleep Time slider (0..900 in steps of 60)
+        self.sleep_label = ctk.CTkLabel(self.controls_frame, text="Sleep Time (seconds)")
+        self.sleep_label.pack(pady=(10,0))
+
+        # We have 15 intervals if we go from 0..900 in steps of 60
+        # so number_of_steps=15 implies 16 discrete positions (including 0).
+        self.sleep_slider = ctk.CTkSlider(
+            self.controls_frame,
+            from_=0,
+            to=900,
+            number_of_steps=15,  # 0..900 (16 positions)
+            command=self.on_sleep_change
+        )
+        self.sleep_slider.set(0)
+        self.sleep_slider.pack(pady=(0,5))
+
+        # Display the sleep time value
+        self.sleep_value_label = ctk.CTkLabel(self.controls_frame, text="0 sec")
+        self.sleep_value_label.pack(pady=(0,10))
+
+        # Internal variable to store current sleep time
+        self.sleep_value = 0
+
+        # 3) Buttons: Setup open/closed eyes, Run, Stop
+        self.button_setup_open = ctk.CTkButton(
+            self.controls_frame,
+            text="Setup Open Eyes",
+            command=self.setup_open_handler
+        )
         self.button_setup_open.pack(pady=5)
 
-        self.button_setup_closed = ctk.CTkButton(self, text="Setup Closed Eyes", command=self.setup_closed_handler)
+        self.button_setup_closed = ctk.CTkButton(
+            self.controls_frame,
+            text="Setup Closed Eyes",
+            command=self.setup_closed_handler
+        )
         self.button_setup_closed.pack(pady=5)
 
-        # Entries for sensitivity & sleep time
-        self.entry_sensitivity = ctk.CTkEntry(self, placeholder_text="Sensitivity (e.g. 0.5)")
-        self.entry_sensitivity.pack(pady=5)
-
-        self.entry_sleep_time = ctk.CTkEntry(self, placeholder_text="Sleep time (seconds)")
-        self.entry_sleep_time.pack(pady=5)
-
-        # Button to run process
-        self.button_run = ctk.CTkButton(self, text="Run Process", command=self.run_process_handler)
+        self.button_run = ctk.CTkButton(
+            self.controls_frame,
+            text="Run Process",
+            command=self.run_process_handler
+        )
         self.button_run.pack(pady=5)
 
-        # Stop/Reset button
-        self.button_stop = ctk.CTkButton(self, text="Stop/Reset", command=self.stop_handler)
+        self.button_stop = ctk.CTkButton(
+            self.controls_frame,
+            text="Stop/Reset",
+            command=self.stop_handler
+        )
         self.button_stop.pack(pady=5)
 
         # Status label
-        self.label_status = ctk.CTkLabel(self, text="Status: Waiting...", font=("Arial", 14))
+        self.label_status = ctk.CTkLabel(self.controls_frame, text="Status: Waiting...")
         self.label_status.pack(pady=10)
 
         # Thread references
         self.process_thread = None
-        self.running = False  # Flag to control thread
+        self.running = False
 
-    def open_camera_preview(self):
+    # ------------------ SLIDER CALLBACKS ------------------ #
+    def on_sensitivity_change(self, val):
         """
-        Opens the camera in a blocking loop using OpenCV.
-        The user can close the window by either:
-        - pressing 'q'
-        - clicking anywhere in the window with the mouse
+        Slider callback for sensitivity: 0.5 -> 1.0 in steps of 0.1
+        'val' is a float from 0.5..1.0
         """
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            self.label_status.configure(text="Error: Cannot open camera.")
-            return
+        # Round to 1 decimal
+        new_val = round(val, 1)
+        self.sensitivity_value = new_val
+        self.sensitivity_value_label.configure(text=str(new_val))
 
-        self.label_status.configure(
-            text="Camera preview opened. Press 'q' or click anywhere in the window to close."
-        )
+    def on_sleep_change(self, val):
+        """
+        Slider callback for sleep time: 0..900 in 15 steps => increments of 60.
+        'val' is a float from 0..900. We'll round it properly to the nearest 60.
+        """
+        step = 60
+        new_val = int(round(val / step) * step)  # e.g. 0, 60, 120, ...
+        # Because we set number_of_steps=15, val is already quantized,
+        # but we do this extra rounding to be safe.
+        self.sleep_slider.set(new_val)
+        self.sleep_value = new_val
+        self.sleep_value_label.configure(text=f"{new_val} sec")
 
-        # A flag to indicate when to close the preview
-        self.close_camera = False
+    # ------------------ CAMERA PREVIEW ------------------ #
+    def update_preview(self):
+        """
+        Continuously capture frames from the camera and show them in 'camera_label'.
+        Called repeatedly via .after().
+        """
+        if self.preview_running and self.cap.isOpened():
+            ret, frame = self.cap.read()
+            if ret:
+                # Convert BGR -> RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # Convert to PIL
+                pil_img = Image.fromarray(frame_rgb)
+                # Resize if you want a certain dimension for display
+                pil_img = pil_img.resize((500, 400), Image.Resampling.LANCZOS)
 
-        # Define a mouse callback that sets `close_camera = True` on left-click
-        def mouse_handler(event, x, y, flags, param):
-            if event == cv2.EVENT_LBUTTONDOWN:
-                self.close_camera = True
+                # Convert to a CustomTkinter-compatible image
+                ctk_img = ctk.CTkImage(light_image=pil_img, size=(500, 400))
+                # Update label
+                self.camera_label.configure(image=ctk_img)
+                self.camera_label.image = ctk_img  # keep a reference to avoid GC
 
-        # Name the OpenCV window and set the callback
-        cv2.namedWindow("Camera Preview")
-        cv2.setMouseCallback("Camera Preview", mouse_handler)
+        # Schedule next update in 30 ms
+        self.after(30, self.update_preview)
 
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            cv2.imshow("Camera Preview", frame)
-
-            # Check if user pressed 'q'
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-            # Check if user clicked in the window
-            if self.close_camera:
-                break
-
-            # OPTIONAL: Also check if the user manually closed the window by clicking the [X]
-            # The window property becomes < 0 when the user clicks the window's close button.
-            if cv2.getWindowProperty("Camera Preview", cv2.WND_PROP_VISIBLE) < 1:
-                break
-
-        cap.release()
-        cv2.destroyAllWindows()
-        self.label_status.configure(text="Camera preview closed.")
-
+    # ------------------ BUTTON HANDLERS ------------------ #
     def setup_open_handler(self):
-        """Call setup_open_eyes from top_cv and update status label."""
+        """
+        Start 'setup open eyes' calibration.
+        In your code, top_cv calls cv_close_eye_detect, which opens its own camera capture, etc.
+        """
+        self.label_status.configure(text="Setting up Open Eyes...")
         success = top_cv.setup_open_eyes()
         if success:
             self.label_status.configure(text="Setup Open Eyes: SUCCESS!")
@@ -117,7 +182,10 @@ class EyeDetectionApp(ctk.CTk):
             self.label_status.configure(text="Setup Open Eyes: FAILED. Try again.")
 
     def setup_closed_handler(self):
-        """Call setup_closed_eyes from top_cv and update status label."""
+        """
+        Start 'setup closed eyes' calibration.
+        """
+        self.label_status.configure(text="Setting up Closed Eyes...")
         success = top_cv.setup_closed_eyes()
         if success:
             self.label_status.configure(text="Setup Closed Eyes: SUCCESS!")
@@ -125,75 +193,56 @@ class EyeDetectionApp(ctk.CTk):
             self.label_status.configure(text="Setup Closed Eyes: FAILED. Try again.")
 
     def run_process_handler(self):
-        """Start the detection process in a separate thread."""
-        sensitivity = self.entry_sensitivity.get()
-        sleep_time = self.entry_sleep_time.get()
-
-        # Basic validation
-        if not sensitivity or not sleep_time:
-            self.label_status.configure(text="Enter sensitivity & sleep time!")
-            return
-
-        # Create a background thread so GUI remains responsive
+        """
+        Run the main detection process in a separate thread to avoid freezing the GUI.
+        """
+        self.label_status.configure(text="Process started in background...")
         self.running = True
+        sensitivity = self.sensitivity_value
+        sleep_time = self.sleep_value
+
         self.process_thread = threading.Thread(
             target=self.run_process_in_thread,
             args=(sensitivity, sleep_time),
             daemon=True
         )
         self.process_thread.start()
-        self.label_status.configure(text="Process started in background...")
 
     def run_process_in_thread(self, sensitivity, sleep_time):
         """
-        Runs the eye detection process in a background thread.
-        If eyes are detected as open, we play the MP3 file using pygame.
+        Background thread that calls top_cv.run_process(...).
         """
         def on_eyes_open_callback():
             self.label_status.configure(text="Eyes detected as open!")
-            self.play_song()
+            # If you want to play an MP3 with pygame or anything else, do it here.
 
         ret = top_cv.run_process(sensitivity, sleep_time, on_eyes_open=on_eyes_open_callback)
 
-        # Once the process finishes, update status
         if self.running:
             self.label_status.configure(text=f"Process finished with return={ret}")
 
-    def play_song(self):
-        """
-        Plays the song.mp3 file in a non-blocking way using pygame.
-        """
-        # If you want to ensure the file is found, build an absolute path
-        # or confirm the file is in the same folder.
-        # For example:
-        # script_dir = os.path.dirname(os.path.abspath(__file__))
-        # mp3_path = os.path.join(script_dir, "song.mp3")
-
-        mp3_path = "song.mp3"  # Or absolute path
-        try:
-            # Stop any currently playing music first (optional)
-            pygame.mixer.music.stop()
-
-            pygame.mixer.music.load(mp3_path)
-            pygame.mixer.music.play()
-        except pygame.error as e:
-            print(f"Error playing {mp3_path}: {e}")
-
     def stop_handler(self):
         """
-        Attempts to stop the detection process.
-        If you have a special mechanism in cv_close_eye_detect to break the loop, call it here.
+        Stop detection or reset states.
         """
-        self.label_status.configure(text="Stop requested...")
+        self.label_status.configure(text="Stop/Reset requested...")
         self.running = False
+        top_cv.stop_detection()
 
-        # If you want to stop the music as well:
-        pygame.mixer.music.stop()
-        # If you have custom logic in cv_close_eye_detect.py to forcibly break loops, call it:
-        # cv_close_eye_detect.stop_detection()  # Hypothetical method
+    # ------------------ WINDOW CLOSE OVERRIDE ------------------ #
+    def on_closing(self):
+        """
+        Override to safely release camera and close.
+        """
+        self.preview_running = False
+        if self.cap.isOpened():
+            self.cap.release()
+        self.destroy()
 
 if __name__ == "__main__":
     ctk.set_appearance_mode("System")
     ctk.set_default_color_theme("blue")
     app = EyeDetectionApp()
+    # Override the default close behavior
+    app.protocol("WM_DELETE_WINDOW", app.on_closing)
     app.mainloop()
