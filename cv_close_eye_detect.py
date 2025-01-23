@@ -1,5 +1,3 @@
-# cv_close_eye_detect.py
-
 import cv2
 import time
 
@@ -12,29 +10,27 @@ class EyeDetector:
         self.face_cascade = cv2.CascadeClassifier(self.face_cascade_path)
         self.eye_cascade = cv2.CascadeClassifier(self.eye_cascade_path)
 
-        # Internal state
-        self.mode = None  # "setup_open", "setup_closed", or "run"
+        self.mode = None
         self.active = False
 
-        # --- For setup_open/setup_closed ---
+        # For setup_open / setup_closed
         self.start_time = 0
         self.frame_count = 0
         self.hit_count = 0
 
-        # --- For run mode (discrete blocks) ---
-        self.block_start_time = 0     # start time for current 15s block
+        # For run mode (15-second blocks, FIFO array)
+        self.block_start_time = 0
         self.block_frame_count = 0
         self.block_hit_count = 0
-
-        self.run_results = [0]*20     # FIFO array of length 20
-        self.block_index = 0          # which slot we’re writing
-        self.awake_time = 30          # user-chosen param (30..300)
+        self.run_results = [0]*20
+        self.block_index = 0
+        self.awake_time = 30  # user-chosen
 
     def start_detection(self, mode, awake_time=30):
         """
-        Begin a detection session.
-        For 'setup_open' or 'setup_closed', same 15s window logic.
-        For 'run', indefinite 15s blocks, storing success/fail in run_results.
+        mode can be "setup_open", "setup_closed", or "run".
+        For run mode, we do the 15s block logic and track success/fail in a FIFO array of length 20.
+        'awake_time' in seconds (30..300).
         """
         self.mode = mode
         self.active = True
@@ -44,7 +40,6 @@ class EyeDetector:
         self.frame_count = 0
         self.hit_count = 0
 
-        # If run mode, also reset block logic
         if mode == "run":
             self.awake_time = awake_time
             self.run_results = [0]*20
@@ -56,11 +51,13 @@ class EyeDetector:
         print(f"[EyeDetector] Starting '{mode}' with awake_time={awake_time}")
 
     def stop_detection(self):
-        """Stop any active detection session (resets everything)."""
+        """
+        Stop any active detection session and reset everything.
+        """
         self.active = False
         self.mode = None
 
-        # Reset run-related counters
+        # Reset run-related
         self.run_results = [0]*20
         self.block_index = 0
         self.block_start_time = 0
@@ -74,23 +71,23 @@ class EyeDetector:
 
     def process_frame(self, frame):
         """
-        Called each frame from the GUI.
-        
+        Called each frame from the GUI to do detection.
+
         Returns: (status, old_mode, out_frame)
-          - status = None => still ongoing
+          - status = None => still running
           - status = 0 => fail (setup modes)
           - status = 1 => success (setup modes)
-          - status = 2 => "awake threshold" event (run mode => play song)
-          
-          old_mode => "setup_open", "setup_closed", or "run"
-          out_frame => frame with face bounding box if face detected
-        """
-        out_frame = frame.copy()  # so we can draw bounding boxes
+          - status = 2 => "awake threshold" event => play the song (run mode)
 
+          old_mode => "setup_open", "setup_closed", or "run"
+          out_frame => frame with green bounding box if face detected
+        """
+        out_frame = frame.copy()
         if not self.active:
-            # Not detecting
+            # Not in detection mode
             return (None, None, out_frame)
 
+        # Convert to grayscale
         gray = cv2.cvtColor(out_frame, cv2.COLOR_BGR2GRAY)
         faces = self.face_cascade.detectMultiScale(
             gray,
@@ -107,9 +104,7 @@ class EyeDetector:
             no_face = True
         else:
             for (x, y, w, h) in faces:
-                # draw green rectangle
                 cv2.rectangle(out_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
                 face_roi = gray[y:y+h, x:x+w]
                 eyes = self.eye_cascade.detectMultiScale(
                     face_roi,
@@ -124,22 +119,22 @@ class EyeDetector:
                 else:
                     print("[EyeDetector] Eyes are CLOSED")
 
-        # ---------- SETUP MODES ----------
+        # -------- Setup Modes -----------
         if self.mode in ("setup_open", "setup_closed"):
             self.frame_count += 1
-
             if self.mode == "setup_open":
-                # If eyes_open => increment
+                # Count eyes_open
                 if eyes_open:
                     self.hit_count += 1
             elif self.mode == "setup_closed":
-                # If face found but eyes not open => increment
+                # Count closed only if a face is found but no eyes
                 if len(faces) > 0 and not eyes_open:
                     self.hit_count += 1
 
             elapsed = time.time() - self.start_time
             if elapsed > 15:
-                ratio = (self.hit_count / float(self.frame_count)) if self.frame_count else 0
+                # Check ratio > 0.8 for success
+                ratio = self.hit_count / float(self.frame_count) if self.frame_count else 0
                 old_mode = self.mode
                 self.stop_detection()
                 if ratio > 0.8:
@@ -151,25 +146,21 @@ class EyeDetector:
 
             return (None, None, out_frame)
 
-        # ---------- RUN MODE (15-second blocks) ----------
+        # -------- Run Mode (15-second blocks) -----------
         if self.mode == "run":
             self.block_frame_count += 1
-
-            # "hit" if eyes_open or no_face
+            # "hit" if eyes_open OR no_face
             if eyes_open or no_face:
                 self.block_hit_count += 1
 
             block_elapsed = time.time() - self.block_start_time
             if block_elapsed > 15:
-                # Evaluate block success if ratio > 0.75
+                # Evaluate success if ratio > 0.65
                 ratio = 0.0
                 if self.block_frame_count > 0:
                     ratio = self.block_hit_count / float(self.block_frame_count)
-                
-                if ratio > 0.65:
-                    success_val = 1
-                else:
-                    success_val = 0
+
+                success_val = 1 if (ratio > 0.65) else 0
 
                 idx = self.block_index % 20
                 self.run_results[idx] = success_val
@@ -182,12 +173,13 @@ class EyeDetector:
 
                 total_success = sum(self.run_results)
                 threshold_blocks = self.awake_time / 15.0
-                print(f"[EyeDetector] run block ended => block_ratio={ratio:.2f}, success={success_val}, sum={total_success}")
+                print(f"[EyeDetector] run block => block_ratio={ratio:.2f}, success={success_val}, sum={total_success}")
 
-                # If sum > threshold_blocks => return code=2 => GUI plays song
+                # If total_success >= threshold_blocks => return code=2 => play the song
                 if total_success >= threshold_blocks:
                     return (2, "run", out_frame)
 
             return (None, None, out_frame)
 
+        # default
         return (None, None, out_frame)

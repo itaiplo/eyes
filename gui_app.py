@@ -4,17 +4,15 @@ import cv2
 import time
 import pygame
 import os
-import random  # for placeholder audio level
+from PIL import Image, ImageTk
+
 import asyncio
 from bleak import BleakScanner
+
 import comtypes
 from ctypes import cast, POINTER
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-
-# For CLSCTX_ALL:
 from comtypes import CLSCTX_ALL
-
-from PIL import Image, ImageTk
 
 from cv_close_eye_detect import EyeDetector
 
@@ -22,16 +20,19 @@ class EyeDetectionApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Unified Detection (Block Logic + Mirror + Bluetooth + AudioLevel)")
+        self.title("Eye Detection with BLE + Audio (Final Fixes)")
         self.geometry("1000x600")
 
+        # Initialize Pygame for MP3 playback
         pygame.mixer.init()
 
+        # State variables
         self.running_preview = True
         self.detection_active = False
-        self.awake_time_value = 30
-        self.sleep_value = 0
+        self.awake_time_value = 30  # 30..300
+        self.sleep_value = 0        # 0..900
 
+        # Single EyeDetector instance
         self.eye_detector = EyeDetector()
 
         # Layout
@@ -39,15 +40,15 @@ class EyeDetectionApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=0)
         self.grid_rowconfigure(0, weight=1)
 
-        # Camera Preview
+        # Camera Preview (left)
         self.camera_label = ctk.CTkLabel(self, text="")
         self.camera_label.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
-        # Controls
+        # Controls frame (right)
         self.controls_frame = ctk.CTkFrame(self, width=300)
         self.controls_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
-        # Awake Time slider
+        # 1) Awake Time slider (30..300 in steps of 30)
         self.awake_label = ctk.CTkLabel(self.controls_frame, text="Awake Time (30..300, step=30)")
         self.awake_label.pack(pady=(10,0))
 
@@ -55,7 +56,7 @@ class EyeDetectionApp(ctk.CTk):
             self.controls_frame,
             from_=30,
             to=300,
-            number_of_steps=9,
+            number_of_steps=9,  # 10 distinct positions
             command=self.on_awake_change
         )
         self.awake_slider.set(30)
@@ -64,7 +65,7 @@ class EyeDetectionApp(ctk.CTk):
         self.awake_value_label = ctk.CTkLabel(self.controls_frame, text="30 sec")
         self.awake_value_label.pack(pady=(0,10))
 
-        # Sleep Time slider
+        # 2) Sleep Time slider (0..900 in steps of 60)
         self.sleep_label = ctk.CTkLabel(self.controls_frame, text="Sleep Time (0..900, step=60)")
         self.sleep_label.pack(pady=(10,0))
 
@@ -81,7 +82,7 @@ class EyeDetectionApp(ctk.CTk):
         self.sleep_value_label = ctk.CTkLabel(self.controls_frame, text="0 sec")
         self.sleep_value_label.pack(pady=(0,10))
 
-        # Buttons
+        # Buttons for setup/run
         self.button_setup_open = ctk.CTkButton(
             self.controls_frame, text="Setup Open Eyes", command=self.setup_open_handler
         )
@@ -105,13 +106,22 @@ class EyeDetectionApp(ctk.CTk):
         self.label_status = ctk.CTkLabel(self.controls_frame, text="Status: Waiting...")
         self.label_status.pack(pady=10)
 
-        # Bluetooth device indicator
-        self.bluetooth_label = ctk.CTkLabel(self.controls_frame, text="Bluetooth: Checking...")
-        self.bluetooth_label.pack(pady=10)
+        # Bluetooth / audio indicators
+        self.bluetooth_label = ctk.CTkLabel(self.controls_frame, text="Bluetooth: ...")
+        self.bluetooth_label.pack(pady=5)
 
-        # Audio level indicator
-        self.audio_level_label = ctk.CTkLabel(self.controls_frame, text="Audio Level: 0")
-        self.audio_level_label.pack(pady=10)
+        self.audio_label = ctk.CTkLabel(self.controls_frame, text="Audio Level: ...")
+        self.audio_label.pack(pady=5)
+
+        self.scan_button = ctk.CTkButton(
+            self.controls_frame, text="Scan BLE Now", command=self.scan_ble_devices
+        )
+        self.scan_button.pack(pady=10)
+
+        self.audio_button = ctk.CTkButton(
+            self.controls_frame, text="Get Audio Level", command=self.show_audio_level
+        )
+        self.audio_button.pack(pady=10)
 
         # Open camera
         self.cap = cv2.VideoCapture(0)
@@ -120,14 +130,14 @@ class EyeDetectionApp(ctk.CTk):
         else:
             self.label_status.configure(text="Camera opened. Ready.")
 
+        # Start camera preview loop
         self.update_preview()
 
-        # Periodically check bluetooth and audio levels
-        self.update_bluetooth_and_audio()
+        # Optionally: Periodic updates for BLE + audio in background
+        # (You can uncomment if you want continuous updates every X sec)
+        # self.update_bluetooth_and_audio()
 
-    # -----------------------------------------
-    # Slider callbacks
-    # -----------------------------------------
+    # ----------------- Slider Callbacks -----------------
     def on_awake_change(self, val):
         step = 30
         new_val = int(round(val / step) * step)
@@ -139,12 +149,10 @@ class EyeDetectionApp(ctk.CTk):
         step = 60
         new_val = int(round(val / step) * step)
         self.sleep_slider.set(new_val)
-        self.sleep_value_label.configure(text=f"{new_val} sec")
         self.sleep_value = new_val
+        self.sleep_value_label.configure(text=f"{new_val} sec")
 
-    # -----------------------------------------
-    # Setup handlers
-    # -----------------------------------------
+    # ----------------- Setup Handlers -----------------
     def setup_open_handler(self):
         self.label_status.configure(text="Setup Open Eyes scheduled...")
         self.detection_active = True
@@ -169,9 +177,7 @@ class EyeDetectionApp(ctk.CTk):
         self.label_status.configure(text="Setting up Closed Eyes (15s)...")
         self.eye_detector.start_detection("setup_closed", awake_time=0)
 
-    # -----------------------------------------
-    # Run mode (block-based logic)
-    # -----------------------------------------
+    # ----------------- Run Process -----------------
     def run_process_handler(self):
         self.label_status.configure(text="Run Process scheduled...")
         self.detection_active = True
@@ -193,40 +199,38 @@ class EyeDetectionApp(ctk.CTk):
         elif mode_str == "run":
             self.do_run()
 
-    # -----------------------------------------
-    # Stop/reset
-    # -----------------------------------------
+    # ----------------- Stop/Reset -----------------
     def stop_handler(self):
         self.label_status.configure(text="Stop/Reset requested...")
         self.detection_active = False
         self.eye_detector.stop_detection()
         pygame.mixer.music.stop()
 
-    # -----------------------------------------
-    # Main preview loop
-    # -----------------------------------------
+    # ----------------- Camera Preview Loop -----------------
     def update_preview(self):
         if self.running_preview and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret:
-                # Mirror the camera
+                # Mirror the camera feed
                 frame = cv2.flip(frame, 1)
 
+                # Pass to EyeDetector if detection is active
                 if self.detection_active:
                     status, old_mode, processed_frame = self.eye_detector.process_frame(frame)
                 else:
                     status, old_mode, processed_frame = (None, None, frame)
 
-                # Display
+                # Display processed_frame
                 frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(frame_rgb).resize((500, 400), Image.Resampling.LANCZOS)
                 ctk_img = ctk.CTkImage(light_image=pil_img, size=(500, 400))
                 self.camera_label.configure(image=ctk_img)
                 self.camera_label.image = ctk_img
 
-                # Check result
+                # Check if detection returned a code
                 if status is not None:
                     if old_mode in ("setup_open", "setup_closed"):
+                        # 0 => fail, 1 => success
                         self.detection_active = False
                         if status == 1:
                             self.label_status.configure(text=f"{old_mode} SUCCESS!")
@@ -234,14 +238,12 @@ class EyeDetectionApp(ctk.CTk):
                             self.label_status.configure(text=f"{old_mode} FAILED.")
                     elif old_mode == "run":
                         if status == 2:
-                            self.label_status.configure(text="Run => sum >= threshold => playing song!")
+                            self.label_status.configure(text="Run => threshold exceeded => playing song!")
                             self.play_song()
 
         self.after(30, self.update_preview)
 
-    # -----------------------------------------
-    # Song playback
-    # -----------------------------------------
+    # ----------------- Song Playback -----------------
     def play_song(self):
         try:
             pygame.mixer.music.stop()
@@ -251,74 +253,96 @@ class EyeDetectionApp(ctk.CTk):
         except Exception as e:
             print(f"Error playing {mp3_path}: {e}")
 
-    # -----------------------------------------
-    # Bluetooth & Audio-level updates
-    # -----------------------------------------
-    def update_bluetooth_and_audio(self):
+    # ----------------- BLE + Audio Routines -----------------
+    def scan_ble_devices(self):
         """
-        Called periodically to update:
-          - Which bluetooth device is connected (placeholder)
-          - The audio level (placeholder)
+        Button handler to scan for BLE devices in a separate thread & event loop
+        to avoid "Thread is configured for Windows GUI" error.
         """
-        # 1) Check Bluetooth
-        device_name = self.check_bluetooth_device()
-        if device_name:
-            self.bluetooth_label.configure(text=f"Bluetooth Device: {device_name}")
-        else:
-            self.bluetooth_label.configure(text="Bluetooth Device: None")
+        def bg_scan():
+            name = self.check_bluetooth_device()
+            if name:
+                self.bluetooth_label.configure(text=f"Bluetooth: {name}")
+            else:
+                self.bluetooth_label.configure(text="Bluetooth: None")
 
-        # 2) Update audio level (placeholder)
-        level = self.get_audio_level()
-        self.audio_level_label.configure(text=f"Audio Level: {level}")
-
-        # Schedule this method to run again in 2000 ms
-        self.after(2000, self.update_bluetooth_and_audio)
+        threading.Thread(target=bg_scan, daemon=True).start()
 
     def check_bluetooth_device(self):
         """
-        Scans for BLE (Bluetooth Low Energy) devices for 5 seconds on Windows 64-bit (and other platforms).
-        Returns the name of the first discovered device, or None if none found.
-
-        NOTE:
-        - Only detects BLE devices, not 'classic' Bluetooth.
-        - If your device is classic Bluetooth, this won't find it.
+        Creates a new asyncio event loop for Bleak scanning to avoid conflicts.
+        Returns name of first BLE device found, or None.
         """
-        try:
-            devices = asyncio.run(BleakScanner.discover(timeout=5.0))
-            if devices:
-                # Return the name of the first device discovered
-                return devices[0].name or "Unnamed BLE Device"
-            else:
+        async def _async_scan():
+            try:
+                devices = await BleakScanner.discover(timeout=5.0)
+                if devices:
+                    return devices[0].name or "Unnamed BLE Device"
                 return None
+            except Exception as e:
+                print(f"Bleak scanning error: {e}")
+                return None
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        device_name = None
+        try:
+            device_name = loop.run_until_complete(_async_scan())
         except Exception as e:
-            print(f"Bleak scanning error: {e}")
-            return None
+            print(f"Bleak scanning error (sync): {e}")
+        finally:
+            loop.close()
+
+        return device_name
+
+    def show_audio_level(self):
+        """
+        Button handler to get the current master volume and update label.
+        """
+        level = self.get_audio_level()
+        if level is not None:
+            self.audio_label.configure(text=f"Audio Level: {level}%")
+        else:
+            self.audio_label.configure(text="Audio Level: Error")
 
     def get_audio_level(self):
         """
-        Returns the master volume level scalar (0..100) for the default audio endpoint
-        using PyCaw. If something goes wrong, returns None.
+        Uses PyCaw to get the Windows master volume (0..100).
         """
         try:
-            # Get default audio playback device
             devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(
-                IAudioEndpointVolume._iid_, CLSCTX_ALL, None
-            )
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
             volume = cast(interface, POINTER(IAudioEndpointVolume))
-            
-            # volume.GetMasterVolumeLevelScalar() => float in [0.0, 1.0]
             level_scalar = volume.GetMasterVolumeLevelScalar()
-            
-            # Convert to percentage
             return int(level_scalar * 100)
         except Exception as e:
-            print(f"get_audio_level() error: {e}")
+            print(f"Audio level error: {e}")
             return None
 
-    # -----------------------------------------
-    # Window close
-    # -----------------------------------------
+    # Optional continuous updates:
+    def update_bluetooth_and_audio(self):
+        """
+        If you want to poll BLE & audio automatically every X seconds,
+        uncomment self.update_bluetooth_and_audio() in __init__().
+        """
+        def bg_check():
+            dev = self.check_bluetooth_device()
+            if dev:
+                self.bluetooth_label.configure(text=f"Bluetooth: {dev}")
+            else:
+                self.bluetooth_label.configure(text="Bluetooth: None")
+
+            level = self.get_audio_level()
+            if level is not None:
+                self.audio_label.configure(text=f"Audio Level: {level}%")
+            else:
+                self.audio_label.configure(text="Audio Level: Error")
+
+        threading.Thread(target=bg_check, daemon=True).start()
+
+        self.after(5000, self.update_bluetooth_and_audio)  # re-check every 5 sec
+
+    # ----------------- Window Close -----------------
     def on_closing(self):
         self.running_preview = False
         if self.cap.isOpened():
