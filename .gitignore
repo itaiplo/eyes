@@ -4,3 +4,4 @@ __pycache__/cv_close_eye_detect.cpython-310.pyc
 build/*
 dist/*
 gui_app.spec
+__pycache__/cv_close_eye_detect.cpython-310.pyc
