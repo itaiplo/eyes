@@ -278,8 +278,9 @@ class EyeDetectionApp(ctk.CTk):
         Uses sounddevice to get the current default audio output device's name.
         """
         try:
-            device_info = sd.query_devices(kind='output')
-            return device_info['name']
+            # print( (sd.query_devices()))
+            device_info = (sd.query_devices()[1]["name"])
+            return device_info
         except Exception as e:
             print(f"Sounddevice error: {e}")
             return None
