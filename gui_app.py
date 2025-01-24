@@ -19,6 +19,18 @@ from comtypes import CLSCTX_ALL
 
 from cv_close_eye_detect import EyeDetector
 
+
+def force_reload_sounddevice_devices():
+    """
+    Force re-init of PortAudio via sounddevice,
+    so query_devices() sees any newly added/removed devices.
+    """
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception as e:
+        print(f"[Warning] Could not re-initialize sounddevice: {e}")
+
 class EyeDetectionApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -277,6 +289,7 @@ class EyeDetectionApp(ctk.CTk):
         """
         Uses sounddevice to get the current default audio output device's name.
         """
+        force_reload_sounddevice_devices()
         try:
             # print( (sd.query_devices()))
             device_info = (sd.query_devices()[1]["name"])
