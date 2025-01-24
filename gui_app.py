@@ -81,7 +81,7 @@ class EyeDetectionApp(ctk.CTk):
         self.awake_value_label.pack(pady=(0,10))
 
         # 2) Sleep Time slider (0..900 in steps of 60)
-        self.sleep_label = ctk.CTkLabel(self.controls_frame, text="Sleep Time (0..900, step=60)")
+        self.sleep_label = ctk.CTkLabel(self.controls_frame, text="Delay before start (in seconds) (0..900, step=60)")
         self.sleep_label.pack(pady=(10,0))
 
         self.sleep_slider = ctk.CTkSlider(
